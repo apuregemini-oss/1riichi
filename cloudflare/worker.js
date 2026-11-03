@@ -12,7 +12,7 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
   const url=new URL(request.url),path=url.pathname;
   const read=request.method==='GET'||request.method==='HEAD';
   if(path==='/api/health'&&read)return json({status:'ok'});
-  if(path==='/api/auth'&&read){const owner=await authenticate(request,env);return json({can_edit:!!owner,mode:'cloudflare',login_url:'/admin/'});}
+  if(path==='/api/auth'&&read){const owner=await authenticate(request,env);return json({can_edit:!!owner,can_create:true,mode:'cloudflare',login_url:'/admin/'});}
   if(path==='/api/bootstrap'&&read){
    const version=(await env.DB.prepare("SELECT value FROM metadata WHERE key='version'").first())?.value??'0';
    const etag=`"ledger-${version}"`;
@@ -29,7 +29,8 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
   }
   if(path.startsWith('/api/')||path.startsWith('/admin')){
    const owner=await authenticate(request,env);
-   requireValue(!!owner,'Sign in as the owner to edit this ledger.',403);
+   const guestCreate=request.method==='POST'&&(path==='/api/admin/sessions'||/^\/api\/admin\/sessions\/[^/]+\/games$/.test(path));
+   requireValue(!!owner||guestCreate,'Sign in as the owner to edit this ledger.',403);
    if(path.startsWith('/admin')&&read){const assetUrl=new URL('/',request.url);return env.ASSETS.fetch(new Request(assetUrl,request));}
    requireValue(path.startsWith('/api/admin/'),'Endpoint not found.',404);
    requireValue(request.headers.get('Origin')===url.origin,'Invalid request origin.',403);

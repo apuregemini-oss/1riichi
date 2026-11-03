@@ -2,7 +2,7 @@
 
 Production uses Vercel Hobby and Neon Free. The local Python backend remains available for local development; it is excluded from Vercel uploads. Production requests go to `api/ledger.js`, using the shared scoring/ledger service and a Postgres adapter.
 
-Public visitors can read sessions and player statistics. Only the owner password grants editing rights. The password is randomly generated with 256 bits of entropy, and its SHA-256 digest and an independent session signing secret are stored as sensitive Vercel environment variables. Browser sessions use a signed, seven-day, HttpOnly/Secure/SameSite cookie. All writes require owner authentication and a matching Origin. Missing configuration fails closed.
+Public visitors can read sessions and player statistics, create sessions, and record games in non-imported sessions. Editing saved games and registering players require the owner password. The password is randomly generated with 256 bits of entropy, and its SHA-256 digest and an independent session signing secret are stored as sensitive Vercel environment variables. Browser sessions use a signed, seven-day, HttpOnly/Secure/SameSite cookie. All writes require a matching Origin. Only POST requests that create sessions or record games are allowed for guests; other writes require owner authentication. Missing configuration fails closed.
 
 The owner's private password is saved locally in `.vercel/owner-password.txt`, which is excluded from uploads and Git. Do not share it. Password rotation requires replacing `OWNER_PASSWORD_HASH` and `OWNER_SESSION_SECRET` and redeploying.
 

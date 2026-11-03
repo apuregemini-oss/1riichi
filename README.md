@@ -11,7 +11,7 @@ A compact, responsive home riichi ledger inspired by Chippirats. Live at https:/
 - Player profiles open in a new tab with recent trends, complete expandable history, average placement, average points, win rate, and best game.
 - Light and dark themes. Existing players and earlier games remain available.
 
-Production sessions and games are saved in Neon Postgres. Everyone can view the ledger; the owner signs in to add or edit games. Local development uses `data/store.json`, created automatically on first run. See [DEPLOYMENT.md](DEPLOYMENT.md) for hosting and authentication details.
+Production sessions and games are saved in Neon Postgres. Guests can view the ledger, create sessions, and record games. The owner signs in to edit saved games or register players. Local development uses `data/store.json`, created automatically on first run. See [DEPLOYMENT.md](DEPLOYMENT.md) for hosting and authentication details.
 
 ## Run locally
 

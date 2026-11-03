@@ -162,7 +162,7 @@ def healthcheck() -> dict[str, Literal["ok"]]:
 
 @app.get("/api/auth")
 def auth_status() -> dict:
-    return {"can_edit": True, "mode": "local"}
+    return {"can_edit": True, "can_create": True, "mode": "local"}
 
 
 @app.get("/api/bootstrap")

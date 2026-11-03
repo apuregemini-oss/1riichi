@@ -5,7 +5,7 @@ export async function route(request,env=process.env){
  const path=new URL(request.url).pathname;
  if(path==='/api/login')return login(request,env);
  if(path==='/api/logout')return logout(request);
- if(path==='/api/auth')return Response.json({can_edit:!!await ownerIdentity(request,env),mode:'vercel',login_url:'/#login'},{headers:{'Cache-Control':'no-store'}});
+ if(path==='/api/auth')return Response.json({can_edit:!!await ownerIdentity(request,env),can_create:true,mode:'vercel',login_url:'/#login'},{headers:{'Cache-Control':'no-store'}});
  if(!env.DATABASE_URL)return Response.json({detail:'Database is not configured yet.'},{status:503});
  return handle(request,{...env,DB:postgresDB(env.DATABASE_URL)}, {waitUntil:()=>{}},ownerIdentity);
 }
