@@ -34,7 +34,7 @@ def write_workbook(path,sheets,backup_dir):
   return ''.join(cell.itertext()) if cell is not None else ''
  changed=[];new_entries=[]
  for model in sheets:
-  fingerprint=hashlib.sha256(json.dumps(model,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+  fingerprint=hashlib.sha256(('layout-v2:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
   existing=None
   for entry in sheet_list:
    root=ET.fromstring(parts[sheet_path(entry)])
@@ -56,7 +56,11 @@ def write_workbook(path,sheets,backup_dir):
   ET.SubElement(view,f'{{{S}}}pane',{'ySplit':'10','topLeftCell':'A11','activePane':'bottomLeft','state':'frozen'})
   ET.SubElement(root,f'{{{S}}}sheetFormatPr',{'defaultRowHeight':'15'})
   columns=ET.SubElement(root,f'{{{S}}}cols')
-  for i in range(len(model['values'][0])):ET.SubElement(columns,f'{{{S}}}col',{'min':str(i+1),'max':str(i+1),'width':'14' if i>=3 and (i-3)%3==0 else '4','customWidth':'1'})
+  for i in range(len(model['values'][0])):
+   if 3<=i<3+model['playerCount']*3:width=[11.3,1.3,8][(i-3)%3]
+   elif i>=4+model['playerCount']*3:width=20 if i==7+model['playerCount']*3 else 16
+   else:width=8 if i==1 else 3
+   ET.SubElement(columns,f'{{{S}}}col',{'min':str(i+1),'max':str(i+1),'width':str(width),'customWidth':'1'})
   data=ET.SubElement(root,f'{{{S}}}sheetData');values={};formulas={}
   for row,line in enumerate(model['values'],1):
    for i,value in enumerate(line,1):
@@ -84,7 +88,8 @@ def write_workbook(path,sheets,backup_dir):
     raise RuntimeError('Unsupported generated formula')
    return round(calc(ast.parse(formula,mode='eval').body),8)
   for row in range(1,len(model['values'])+1):
-   rowxml=ET.SubElement(data,f'{{{S}}}row',{'r':str(row),**({'hidden':'1'} if row in [5,6] else {})})
+   height=37 if row==8 else 40 if row==9 else 24 if row in [1,2,3,7] else 18 if row==10 else 15
+   rowxml=ET.SubElement(data,f'{{{S}}}row',{'r':str(row),'ht':str(height),'customHeight':'1',**({'hidden':'1'} if row in [5,6] else {})})
    for i in range(1,len(model['values'][0])+1):
     ref=f'{col(i)}{row}'
     if ref not in values and ref not in formulas:continue
@@ -96,6 +101,14 @@ def write_workbook(path,sheets,backup_dir):
     if ref in formulas:ET.SubElement(cell,f'{{{S}}}f').text=formulas[ref];ET.SubElement(cell,f'{{{S}}}v').text=str(number(ref))
     elif isinstance(values[ref],(int,float)):ET.SubElement(cell,f'{{{S}}}v').text=str(values[ref])
     else:cell.set('t','inlineStr');ET.SubElement(ET.SubElement(cell,f'{{{S}}}is'),f'{{{S}}}t').text=str(values[ref])
+  merges=ET.SubElement(root,f'{{{S}}}mergeCells')
+  def merge(ref):ET.SubElement(merges,f'{{{S}}}mergeCell',{'ref':ref})
+  for j in range(model['playerCount']):
+   a,b=col(4+j*3),col(6+j*3)
+   for row in [7,8,9,10]:merge(f'{a}{row}:{b}{row}')
+  for row in range(12,12+model['gameCount']*2,2):
+   for c in ['B']+[col(4+j*3) for j in range(model['playerCount'])]+[col(5+model['playerCount']*3),col(7+model['playerCount']*3)]:merge(f'{c}{row}:{c}{row+1}')
+  merges.set('count',str(len(merges)))
   parts[target]=xml(root);changed.append(model['name'])
  if not changed:return []
  calc=wb.find(f'{{{S}}}calcPr')
