@@ -1,0 +1,14 @@
+CREATE TABLE IF NOT EXISTS players(id text PRIMARY KEY,name text NOT NULL,payload text NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS player_names ON players(lower(name));
+CREATE TABLE IF NOT EXISTS sessions(id text PRIMARY KEY,payload text NOT NULL);
+CREATE TABLE IF NOT EXISTS games(id text PRIMARY KEY,session_id text REFERENCES sessions(id),payload text NOT NULL,revision integer NOT NULL DEFAULT 1);
+CREATE INDEX IF NOT EXISTS games_session ON games(session_id);
+CREATE TABLE IF NOT EXISTS metadata(key text PRIMARY KEY,value text NOT NULL);
+INSERT INTO metadata(key,value) VALUES('version','1') ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS game_edits(id bigserial PRIMARY KEY,game_id text NOT NULL,previous_payload text NOT NULL,previous_revision integer NOT NULL,edited_at timestamptz NOT NULL DEFAULT now());
+CREATE OR REPLACE FUNCTION ledger_changed() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN UPDATE metadata SET value=(value::bigint+1)::text WHERE key='version'; RETURN NEW; END $$;
+CREATE OR REPLACE FUNCTION ledger_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO game_edits(game_id,previous_payload,previous_revision) VALUES(OLD.id,OLD.payload,OLD.revision); RETURN NEW; END $$;
+CREATE OR REPLACE TRIGGER audit_game BEFORE UPDATE ON games FOR EACH ROW EXECUTE FUNCTION ledger_audit();
+CREATE OR REPLACE TRIGGER version_games AFTER INSERT OR UPDATE ON games FOR EACH ROW EXECUTE FUNCTION ledger_changed();
+CREATE OR REPLACE TRIGGER version_players AFTER INSERT ON players FOR EACH ROW EXECUTE FUNCTION ledger_changed();
+CREATE OR REPLACE TRIGGER version_sessions AFTER INSERT ON sessions FOR EACH ROW EXECUTE FUNCTION ledger_changed();

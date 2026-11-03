@@ -1,0 +1,22 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.runtime-deps/
+.wrangler/
+cloudflare/.generated/
+.vercel/
+.env*
+
+# Local ledger records, source exports, and generated artifacts
+data/
+imports/*.json
+imports/*.csv
+imports/*.xlsx
+*.log
+preview-*.png
+preview-*.jpg
+.tools/
+
+.vercel
+.env*

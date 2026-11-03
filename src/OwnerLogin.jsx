@@ -1,0 +1,5 @@
+import {useState} from 'react';
+export default function OwnerLogin({onLogin}){
+ const [password,setPassword]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ return <section><h1>Owner sign in</h1><p className="muted">Everyone can view the ledger. Enter your private owner password to add or edit games.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setError('');try{const response=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})});const result=await response.json();if(!response.ok)throw Error(result.detail||'Sign-in failed.');setPassword('');await onLogin();}catch(e){setError(e.message);}finally{setBusy(false);}}}><label className="field"><span>Owner password</span><input type="password" autoComplete="current-password" required value={password} onChange={e=>setPassword(e.target.value)}/></label>{error&&<p role="alert" className="error">{error}</p>}<button className="primary" disabled={busy}>{busy?'Signing in…':'Sign in'}</button></form></section>;
+}
