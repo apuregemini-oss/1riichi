@@ -13,3 +13,13 @@ Initial migration: 44 players, 104 sessions, 817 games. `cloudflare/export_ledge
 Validation: `npm run build`, `node --test server/*.test.js cloudflare/worker.test.js src/playerStats.test.js`. The tests include full migration into an in-memory Postgres runtime, score parity with historical records, owner authentication, rejected anonymous writes, edit auditing and stale revision rejection.
 
 To deploy later changes: `npx vercel deploy --prod`. Stay on Hobby and the database Free plan; no paid upgrade was selected. Cloudflare files are retained as an alternative deployment implementation, but Cloudflare was not published.
+
+## Local OneDrive Excel sync
+
+Guests and the owner can finish a non-imported session after recording games. Finished sessions reject additional games; the owner can still correct saved games. The `session-finish.sql` migration updates cache invalidation and serializes new game inserts against session completion.
+
+On Eric's PC, the Windows task `1riichi OneDrive workbook sync` runs every two minutes and at sign-in. It reads finished sessions from the public ledger, generates the historical worksheet layout, subtracts ten points from each game's winner in Excel only, and updates the workbook configured in ignored `.local-sync/config.json`. OneDrive then uploads the local change. The PC must be awake and signed in, with OneDrive syncing. Close the workbook in desktop Excel so the helper can update it. Avoid editing the same workbook online during local syncing to prevent OneDrive conflicts.
+
+The helper preserves existing workbook ZIP parts, backs up the full workbook under `.local-sync/backups`, checks for concurrent file changes, and replaces the workbook atomically. A hidden session marker and content fingerprint prevent duplicate tabs and repeat deductions; later owner score corrections update the same exported tab. It does not export historical/imported sessions. A tied winner without a selected fee winner must be resolved before finishing.
+
+Local status: `.local-sync/status.json`. Manual run: `node sync/run.mjs`. Install/reinstall the task: `powershell -File sync/install.ps1`. Stop it: `Disable-ScheduledTask -TaskName '1riichi OneDrive workbook sync'`. The workbook path, local configuration, backups, and logs are excluded from GitHub and Vercel uploads.

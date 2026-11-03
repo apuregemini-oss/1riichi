@@ -5,6 +5,8 @@
 .codex
 .openai
 .env*
+.local-sync
+sync
 server/*.test.js
 server/migrate.mjs
 server/schema.sql

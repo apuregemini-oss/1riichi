@@ -19,6 +19,9 @@ test('guests create sessions and games but cannot edit or register players',asyn
   const body={results:['a','b','c','d'].map((player_id,i)=>({player_id,score:40000-i*10000})),host_player_id:'b'};
   const saved=await call(`sessions/${session.id}/games`,body);assert.equal(saved.status,201);
   const game=await saved.json();assert.equal(game.results[0].final_points,60);assert.equal(game.host_fee.chips,5);
+  const finished=await call(`sessions/${session.id}/finish`,{});assert.equal(finished.status,200);assert.ok((await finished.json()).finished_at);
+  assert.equal((await call(`sessions/${session.id}/finish`,{})).status,200);
+  assert.equal((await call(`sessions/${session.id}/games`,body)).status,400);
   assert.equal((await call(`games/${game.id}`,{...body,revision:1},'PUT')).status,403);
   assert.equal((await call(`games/${game.id}`,{},'DELETE')).status,403);
   assert.equal((await call('players',{name:'Unauthorized registration'})).status,403);

@@ -1,5 +1,6 @@
 import {ownerIdentity} from './auth.js';
 import {InputError,requireValue,validateSession,makeGame} from './scoring.js';
+import {sessionWorksheet} from '../server/excel-export.js';
 const json=(data,status=200,headers={})=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers}});
 const publicGame=game=>{const {source,points_standardization,...rest}=game;return {...rest,results:game.results.map(({player_id,score,place,place_label,uma,final_points})=>({player_id,score,place,place_label,uma,final_points}))};};
 async function bodyOf(request){
@@ -29,12 +30,26 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
   }
   if(path.startsWith('/api/')||path.startsWith('/admin')){
    const owner=await authenticate(request,env);
-   const guestCreate=request.method==='POST'&&(path==='/api/admin/sessions'||/^\/api\/admin\/sessions\/[^/]+\/games$/.test(path));
+   const guestCreate=request.method==='POST'&&(path==='/api/admin/sessions'||/^\/api\/admin\/sessions\/[^/]+\/(games|finish)$/.test(path));
    requireValue(!!owner||guestCreate,'Sign in as the owner to edit this ledger.',403);
    if(path.startsWith('/admin')&&read){const assetUrl=new URL('/',request.url);return env.ASSETS.fetch(new Request(assetUrl,request));}
    requireValue(path.startsWith('/api/admin/'),'Endpoint not found.',404);
    requireValue(request.headers.get('Origin')===url.origin,'Invalid request origin.',403);
    const body=await bodyOf(request);
+   const finish=path.match(/^\/api\/admin\/sessions\/([^/]+)\/finish$/);
+   if(finish&&request.method==='POST'){
+    const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(finish[1]).first();
+    requireValue(!!row,'Session not found.',404);
+    const session=JSON.parse(row.payload);requireValue(!session.imported_only,'Historical sessions are already in the workbook.');
+    if(session.finished_at)return json(session);
+    const records=await env.DB.prepare('SELECT payload FROM games WHERE session_id=?').bind(session.id).all();
+    const players=await env.DB.prepare('SELECT payload FROM players').all();
+    try{sessionWorksheet(session,records.results.map(r=>JSON.parse(r.payload)),players.results.map(r=>JSON.parse(r.payload)));}catch(e){throw new InputError(e.message);}
+    session.finished_at=new Date().toISOString();
+    const result=await env.DB.prepare('UPDATE sessions SET payload=? WHERE id=? AND payload=?').bind(JSON.stringify(session),session.id,row.payload).run();
+    requireValue(result.meta.changes===1,'Session changed. Refresh and try again.',409);
+    return json(session);
+   }
    if(path==='/api/admin/players'&&request.method==='POST'){
     const name=body.name?.trim();requireValue(typeof name==='string'&&name.length>0&&name.length<=32,'Enter a player name (up to 32 characters).');
     const player={id:crypto.randomUUID(),name};
@@ -52,7 +67,7 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
     if(edit){const row=await env.DB.prepare('SELECT payload,revision FROM games WHERE id=?').bind(edit[1]).first();requireValue(!!row,'Game not found.',404);previous=JSON.parse(row.payload);requireValue(Number.isInteger(body.revision)&&body.revision===row.revision,'This game changed. Reload before editing.',409);}
     const sessionId=add?.[1]??previous?.session_id;
     if(sessionId){const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(sessionId).first();requireValue(!!row,'Session not found.',404);session=JSON.parse(row.payload);}
-    if(add)requireValue(!session.imported_only,'Create a new session to record new games.');
+    if(add){requireValue(!session.imported_only,'Create a new session to record new games.');requireValue(!session.finished_at,'This session is finished. Create a new session.');}
     const players=await env.DB.prepare('SELECT id FROM players').all();
     const game=makeGame(body,session,new Set(players.results.map(p=>p.id)),previous);
     if(edit){const result=await env.DB.prepare('UPDATE games SET payload=?,revision=revision+1 WHERE id=? AND revision=?').bind(JSON.stringify(game),game.id,body.revision).run();requireValue(result.meta.changes===1,'This game changed. Reload before editing.',409);}

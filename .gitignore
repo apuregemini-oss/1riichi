@@ -17,6 +17,7 @@ imports/*.xlsx
 preview-*.png
 preview-*.jpg
 .tools/
+.local-sync/
 
 .vercel
 .env*
