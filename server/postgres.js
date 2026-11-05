@@ -9,7 +9,7 @@ export function postgresDB(url,driver){
   return {bind(...values){params=values;return this;},
    async first(){return (await sql.query(query,params))[0]??null;},
    async all(){return {results:await sql.query(query,params)};},
-   async run(){const results=await sql.query(query+' RETURNING id',params);return {results,meta:{changes:results.length}};}
+   async run(){const results=await sql.query(query+(/^(INSERT INTO|UPDATE) metadata\b/i.test(query)?' RETURNING key AS id':' RETURNING id'),params);return {results,meta:{changes:results.length}};}
   };
  }
  return {prepare,batch:statements=>Promise.all(statements.map(s=>s.all()))};

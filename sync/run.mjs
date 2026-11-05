@@ -5,7 +5,23 @@ import {sessionWorksheet} from '../server/excel-export.js';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const config=JSON.parse(readFileSync(new URL('../.local-sync/config.json',import.meta.url),'utf8'));
 mkdirSync(root+'.local-sync',{recursive:true});
+let syncRequest=null,headers=null;
+async function requestState(body){
+ const response=await fetch(config.site+'/api/admin/excel-sync',{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(30000)});
+ if(!response.ok)throw Error('Sync request failed: '+response.status);
+ return response.json();
+}
 try{
+ const password=readFileSync(root+'.vercel/owner-password.txt','utf8').trim();
+ headers={Origin:config.site,'Content-Type':'application/json'};
+ const login=await fetch(config.site+'/api/login',{method:'POST',headers,body:JSON.stringify({password}),signal:AbortSignal.timeout(30000)});
+ if(!login.ok)throw Error('PC helper owner login failed: '+login.status);
+ headers.Cookie=login.headers.get('set-cookie').split(';')[0];
+ syncRequest=await requestState();
+ if(syncRequest.status!=='pending'){
+  writeFileSync(root+'.local-sync/status.json',JSON.stringify({checked_at:new Date().toISOString(),mode:'manual',status:'idle',error:null},null,2));
+  console.log('No manual sync requested.');process.exit(0);
+ }
  const response=await fetch(config.site+'/api/bootstrap',{signal:AbortSignal.timeout(30000)});
  if(!response.ok)throw Error('Ledger request failed: '+response.status);
  const data=await response.json();
@@ -18,5 +34,6 @@ try{
  }
  writeFileSync(root+'.local-sync/status.json',JSON.stringify({checked_at:new Date().toISOString(),finished_sessions:sheets.length,updated,error:null},null,2));
  if(updated.length)appendFileSync(root+'.local-sync/sync.log',new Date().toISOString()+' '+JSON.stringify(updated)+'\n');
+ await requestState({action:'complete',id:syncRequest.id});
  console.log(JSON.stringify({finished_sessions:sheets.length,updated}));
-}catch(error){writeFileSync(root+'.local-sync/status.json',JSON.stringify({checked_at:new Date().toISOString(),error:error.message},null,2));console.error(error.message);process.exitCode=1;}
+}catch(error){writeFileSync(root+'.local-sync/status.json',JSON.stringify({checked_at:new Date().toISOString(),error:error.message},null,2));if(syncRequest?.status==='pending')try{await requestState({action:'error',id:syncRequest.id,error:error.message});}catch{}console.error(error.message);process.exitCode=1;}

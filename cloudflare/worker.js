@@ -35,8 +35,27 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
    requireValue(!!owner||guestCreate||guestDelete,'Sign in as the owner to edit this ledger.',403);
    if(path.startsWith('/admin')&&read){const assetUrl=new URL('/',request.url);return env.ASSETS.fetch(new Request(assetUrl,request));}
    requireValue(path.startsWith('/api/admin/'),'Endpoint not found.',404);
+   if(path==='/api/admin/excel-sync'&&read){
+    const row=await env.DB.prepare("SELECT value FROM metadata WHERE key='excel_sync_request'").first();
+    return json(row?JSON.parse(row.value):{status:'idle'});
+   }
    requireValue(request.headers.get('Origin')===url.origin,'Invalid request origin.',403);
    const body=await bodyOf(request);
+   if(path==='/api/admin/excel-sync'&&request.method==='POST'){
+    const row=await env.DB.prepare("SELECT value FROM metadata WHERE key='excel_sync_request'").first();
+    const previous=row?JSON.parse(row.value):null;
+    if(body.action==='complete'||body.action==='error'){
+     requireValue(previous?.id===body.id&&previous.status==='pending','Sync request changed.',409);
+     const next={...previous,status:body.action,completed_at:new Date().toISOString(),error:body.action==='error'?String(body.error??'Sync failed').slice(0,300):null};
+     const result=await env.DB.prepare("UPDATE metadata SET value=? WHERE key='excel_sync_request' AND value=?").bind(JSON.stringify(next),row.value).run();
+     requireValue(result.meta.changes===1,'Sync request changed.',409);return json(next);
+    }
+    requireValue(!body.action||body.action==='request','Invalid sync action.');
+    if(previous?.status==='pending')return json(previous);
+    const next={id:crypto.randomUUID(),status:'pending',requested_at:new Date().toISOString()};
+    await env.DB.prepare("INSERT INTO metadata(key,value) VALUES('excel_sync_request',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify(next)).run();
+    return json(next);
+   }
    const finish=path.match(/^\/api\/admin\/sessions\/([^/]+)\/finish$/);
    if(finish&&request.method==='POST'){
     const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(finish[1]).first();
