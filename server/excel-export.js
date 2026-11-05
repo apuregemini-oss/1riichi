@@ -2,9 +2,10 @@
 // No ledger points are modified: the ten-point deduction exists only in Excel.
 export function columnName(index){let result='';for(let n=index+1;n;n=Math.floor((n-1)/26))result=String.fromCharCode(65+(n-1)%26)+result;return result;}
 export function sessionWorksheet(session,games,players){
- if(!games.length)throw Error('Record at least one game before finishing the session.');
+ if(!games.length&&!session.finished_at)throw Error('Record at least one game before finishing the session.');
  const ordered=[...games].sort((a,b)=>a.date.localeCompare(b.date)||(a.source_game_number??0)-(b.source_game_number??0)||a.id.localeCompare(b.id));
  const ids=[...new Set(ordered.flatMap(g=>g.results.map(r=>r.player_id)))];
+ if(!ids.length)ids.push(...(session.excel_player_ids??[]));
  const names=new Map(players.map(p=>[p.id,p.name]));
  if(ids.some(id=>!names.has(id)))throw Error('A player name is missing.');
  // Eric occupies the last player column, matching the existing host total.
@@ -20,7 +21,7 @@ export function sessionWorksheet(session,games,players){
  put(1,1,'Winner points include uma/oka, less 10 points per game for the fee.');
  put(2,1,'Website lifetime points remain before this deduction.');
  put(3,1,session.name);
- const played=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ordered[0].date));
+ const played=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ordered[0]?.date??session.created_at));
  const day=played.match(/\d{4}-\d{2}-\d{2}/)?.[0];
  if(!day)throw Error('Invalid session date.');
  put(7,3+(ids.length-1)*3,(Date.parse(day+'T00:00:00Z')-Date.UTC(1899,11,30))/86400000);
@@ -37,7 +38,7 @@ export function sessionWorksheet(session,games,players){
   if(Math.abs(game.results.reduce((n,r)=>n+r.final_points,0))>0.11)throw Error('Game points do not balance.');
   const place=Math.min(...game.results.map(r=>r.place));
   const top=game.results.filter(r=>r.place===place);
-  const winner=top.length===1?top[0].player_id:game.host_fee?.winner_player_id;
+  const winner=top.length===1?top[0].player_id:game.excel_fee_winner_player_id??game.host_fee?.winner_player_id;
   if(!top.some(r=>r.player_id===winner))throw Error('Choose a tie-break winner before exporting this game.');
   const row=12+i*2;put(row,1,i+1);put(row,feeColumn,10);
   for(const [j,id] of ids.entries()){

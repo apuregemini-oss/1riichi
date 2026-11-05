@@ -1,0 +1,51 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {PGlite} from '@electric-sql/pglite';
+import {postgresDB} from './postgres.js';
+import {handle} from '../cloudflare/worker.js';
+import {makeGame,validateSession} from '../cloudflare/scoring.js';
+import {sessionWorksheet} from './excel-export.js';
+const ids=new Set(['a','b','c','d']);
+const session={...validateSession({name:'Ties'}),id:'s',created_at:'2026-11-05T12:00:00Z'};
+const raw=[35000,35000,15000,15000].map((score,i)=>({player_id:[...ids][i],score}));
+test('ties require explicit choices; ordered places and split bonuses score correctly',()=>{
+ assert.throws(()=>makeGame({results:raw},session,ids),/Choose placements/);
+ const choices=[{score:35000,mode:'order',order:['b','a']},{score:15000,mode:'split'}];
+ const game=makeGame({results:raw,tie_breaks:choices,host_player_id:'b'},session,ids);
+ assert.deepEqual(game.results.map(r=>[r.player_id,r.place,r.final_points]),[['a',2,15],['b',1,55],['c',3.5,-35],['d',3.5,-35]]);
+ assert.equal(game.host_fee.chips,0);
+ assert.throws(()=>makeGame({results:raw,tie_breaks:[{...choices[0],order:['a','a']},choices[1]]},session,ids),/different placement/);
+ const split=[{score:35000,mode:'split'},choices[1]];
+ assert.throws(()=>makeGame({results:raw,tie_breaks:split},session,ids),/winner for fees/);
+ const shared=makeGame({results:raw,tie_breaks:split,winner_player_id:'b'},session,ids);
+ assert.deepEqual(shared.results.map(r=>r.final_points),[35,35,-35,-35]);
+ const worksheet=sessionWorksheet(session,[shared],[...ids].map(id=>({id,name:id})));
+ assert.equal(worksheet.values[11][6],25);
+});
+test('guest deletion is limited to open sessions; audit and live stats stay consistent',async()=>{
+ const pg=new PGlite();
+ try{
+  await pg.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));
+  const DB=postgresDB(null,{query:async(q,p)=>(await pg.query(q,p)).rows});
+  for(const id of ids)await DB.prepare('INSERT INTO players(id,name,payload) VALUES(?,?,?)').bind(id,id,JSON.stringify({id,name:id})).run();
+  await DB.prepare('INSERT INTO sessions(id,payload) VALUES(?,?)').bind('s',JSON.stringify(session)).run();
+  const call=(path,body,method='POST',owner=false)=>handle(new Request('https://ledger.example/api/'+path,{method,headers:{Origin:'https://ledger.example','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),{DB},{waitUntil:()=>{}},async()=>owner?{owner:true}:null);
+  const body={results:[40000,30000,20000,10000].map((score,i)=>({player_id:[...ids][i],score}))};
+  const game=await (await call('admin/sessions/s/games',body)).json();
+  assert.equal((await call('admin/games/'+game.id,{revision:99},'DELETE')).status,409);
+  assert.equal((await call('admin/games/'+game.id,{revision:1},'DELETE')).status,200);
+  assert.equal((await (await call('bootstrap',null,'GET')).json()).games.length,0);
+  assert.equal((await pg.query('SELECT * FROM game_edits')).rows.length,1);
+  assert.equal((await call('admin/games/'+game.id,{...body,revision:2},'PUT',true)).status,404);
+  assert.equal((await call('admin/sessions/s/finish',{})).status,400);
+  const game2=await (await call('admin/sessions/s/games',body)).json();
+  assert.equal((await call('admin/sessions/s/finish',{})).status,200);
+  assert.equal((await call('admin/games/'+game2.id,{revision:1},'DELETE')).status,403);
+  assert.equal((await call('admin/games/'+game2.id,{revision:1},'DELETE',true)).status,200);
+  const data=await (await call('bootstrap',null,'GET')).json();
+  const sheet=sessionWorksheet(data.sessions[0],data.games,data.players);
+  assert.equal(sheet.gameCount,0);assert.equal(sheet.playerCount,4);
+  assert.ok((await pg.query('SELECT payload FROM games')).rows.every(r=>JSON.parse(r.payload).deleted_at));
+ }finally{await pg.close();}
+});

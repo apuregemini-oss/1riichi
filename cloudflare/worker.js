@@ -23,7 +23,7 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
    const cached=cache?await cache.match(key):null;
    if(cached)return new Response(cached.body,{headers:{'Content-Type':'application/json',ETag:etag,'Cache-Control':'no-cache'}});
    const [p,s,g]=await env.DB.batch([env.DB.prepare('SELECT payload FROM players ORDER BY name'),env.DB.prepare('SELECT payload FROM sessions ORDER BY json_extract(payload,\'$.created_at\') DESC'),env.DB.prepare('SELECT payload,revision FROM games ORDER BY json_extract(payload,\'$.date\') DESC, json_extract(payload,\'$.source_game_number\') DESC')]);
-   const payload={players:p.results.map(r=>JSON.parse(r.payload)),sessions:s.results.map(r=>{const v=JSON.parse(r.payload);return {...v,source:v.source?.chippirats_session_id?{chippirats_session_id:v.source.chippirats_session_id}:undefined};}),games:g.results.map(r=>publicGame({...JSON.parse(r.payload),revision:r.revision}))};
+   const payload={players:p.results.map(r=>JSON.parse(r.payload)),sessions:s.results.map(r=>{const v=JSON.parse(r.payload);return {...v,excel_player_ids:v.finished_at? [...new Set(g.results.map(r=>JSON.parse(r.payload)).filter(game=>game.session_id===v.id).flatMap(game=>game.results.map(r=>r.player_id)))]:undefined,source:v.source?.chippirats_session_id?{chippirats_session_id:v.source.chippirats_session_id}:undefined};}),games:g.results.filter(r=>!JSON.parse(r.payload).deleted_at).map(r=>publicGame({...JSON.parse(r.payload),revision:r.revision}))};
    const content=JSON.stringify(payload);
    if(cache)ctx.waitUntil(cache.put(key,new Response(content,{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=86400'}})));
    return new Response(content,{headers:{'Content-Type':'application/json',ETag:etag,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'}});
@@ -31,7 +31,8 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
   if(path.startsWith('/api/')||path.startsWith('/admin')){
    const owner=await authenticate(request,env);
    const guestCreate=request.method==='POST'&&(path==='/api/admin/sessions'||/^\/api\/admin\/sessions\/[^/]+\/(games|finish)$/.test(path));
-   requireValue(!!owner||guestCreate,'Sign in as the owner to edit this ledger.',403);
+   const guestDelete=request.method==='DELETE'&&/^\/api\/admin\/games\/[^/]+$/.test(path);
+   requireValue(!!owner||guestCreate||guestDelete,'Sign in as the owner to edit this ledger.',403);
    if(path.startsWith('/admin')&&read){const assetUrl=new URL('/',request.url);return env.ASSETS.fetch(new Request(assetUrl,request));}
    requireValue(path.startsWith('/api/admin/'),'Endpoint not found.',404);
    requireValue(request.headers.get('Origin')===url.origin,'Invalid request origin.',403);
@@ -44,7 +45,7 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
     if(session.finished_at)return json(session);
     const records=await env.DB.prepare('SELECT payload FROM games WHERE session_id=?').bind(session.id).all();
     const players=await env.DB.prepare('SELECT payload FROM players').all();
-    try{sessionWorksheet(session,records.results.map(r=>JSON.parse(r.payload)),players.results.map(r=>JSON.parse(r.payload)));}catch(e){throw new InputError(e.message);}
+    try{sessionWorksheet(session,records.results.map(r=>JSON.parse(r.payload)).filter(g=>!g.deleted_at),players.results.map(r=>JSON.parse(r.payload)));}catch(e){throw new InputError(e.message);}
     session.finished_at=new Date().toISOString();
     const result=await env.DB.prepare('UPDATE sessions SET payload=? WHERE id=? AND payload=?').bind(JSON.stringify(session),session.id,row.payload).run();
     requireValue(result.meta.changes===1,'Session changed. Refresh and try again.',409);
@@ -62,9 +63,24 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
    }
    const add=path.match(/^\/api\/admin\/sessions\/([^/]+)\/games$/);
    const edit=path.match(/^\/api\/admin\/games\/([^/]+)$/);
+   if(edit&&request.method==='DELETE'){
+    const row=await env.DB.prepare('SELECT payload,revision FROM games WHERE id=?').bind(edit[1]).first();
+    requireValue(!!row,'Game not found.',404);
+    const game=JSON.parse(row.payload);requireValue(!game.deleted_at,'Game already deleted.',409);
+    requireValue(Number.isInteger(body.revision)&&body.revision===row.revision,'This game changed. Reload before deleting.',409);
+    const sessionRow=game.session_id?await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(game.session_id).first():null;
+    const session=sessionRow?JSON.parse(sessionRow.payload):null;
+    requireValue(!!owner||(session&&!session.finished_at&&!session.imported_only),'Only the owner can delete games from finished or historical sessions.',403);
+    game.deleted_at=new Date().toISOString();
+    const statement=owner?'UPDATE games SET payload=?,revision=revision+1 WHERE id=? AND revision=?':"UPDATE games SET payload=?,revision=revision+1 WHERE id=? AND revision=? AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=games.session_id AND payload=?)";
+    const args=[JSON.stringify(game),game.id,body.revision];if(!owner)args.push(sessionRow.payload);
+    const result=await env.DB.prepare(statement).bind(...args).run();
+    requireValue(result.meta.changes===1,'Game or session changed. Refresh and try again.',409);
+    return json({ok:true});
+   }
    if((add&&request.method==='POST')||(edit&&request.method==='PUT')){
     let previous=null,session=null;
-    if(edit){const row=await env.DB.prepare('SELECT payload,revision FROM games WHERE id=?').bind(edit[1]).first();requireValue(!!row,'Game not found.',404);previous=JSON.parse(row.payload);requireValue(Number.isInteger(body.revision)&&body.revision===row.revision,'This game changed. Reload before editing.',409);}
+    if(edit){const row=await env.DB.prepare('SELECT payload,revision FROM games WHERE id=?').bind(edit[1]).first();requireValue(!!row,'Game not found.',404);previous=JSON.parse(row.payload);requireValue(!previous.deleted_at,'Game not found.',404);requireValue(Number.isInteger(body.revision)&&body.revision===row.revision,'This game changed. Reload before editing.',409);}
     const sessionId=add?.[1]??previous?.session_id;
     if(sessionId){const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(sessionId).first();requireValue(!!row,'Session not found.',404);session=JSON.parse(row.payload);}
     if(add){requireValue(!session.imported_only,'Create a new session to record new games.');requireValue(!session.finished_at,'This session is finished. Create a new session.');}

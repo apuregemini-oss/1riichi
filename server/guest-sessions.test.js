@@ -23,7 +23,7 @@ test('guests create sessions and games but cannot edit or register players',asyn
   assert.equal((await call(`sessions/${session.id}/finish`,{})).status,200);
   assert.equal((await call(`sessions/${session.id}/games`,body)).status,400);
   assert.equal((await call(`games/${game.id}`,{...body,revision:1},'PUT')).status,403);
-  assert.equal((await call(`games/${game.id}`,{},'DELETE')).status,403);
+  assert.equal((await call(`games/${game.id}`,{revision:1},'DELETE')).status,403);
   assert.equal((await call('players',{name:'Unauthorized registration'})).status,403);
   const imported={...session,id:'imported',imported_only:true};
   await DB.prepare('INSERT INTO sessions(id,payload) VALUES(?,?)').bind(imported.id,JSON.stringify(imported)).run();
