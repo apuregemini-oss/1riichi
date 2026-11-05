@@ -29,18 +29,28 @@ def write_workbook(path,sheets,backup_dir):
  if template is None:raise RuntimeError('Workbook Template sheet is missing.')
  template_xml=ET.fromstring(parts[sheet_path(template)])
  styles={c.get('r'):c.get('s') for c in template_xml.findall(f'.//{{{S}}}c')}
+ shared_strings=[]
+ if 'xl/sharedStrings.xml' in parts:
+  shared_strings=[''.join(t.text or '' for t in item.iter(f'{{{S}}}t')) for item in ET.fromstring(parts['xl/sharedStrings.xml'])]
+ def cell_text(cell):
+  if cell is None:return ''
+  if cell.get('t')=='s':
+   value=cell.find(f'{{{S}}}v')
+   return shared_strings[int(value.text)] if value is not None else ''
+  return ''.join(cell.itertext())
  def text_at(root,ref):
   cell=root.find(f'.//{{{S}}}c[@r="{ref}"]')
-  return ''.join(cell.itertext()) if cell is not None else ''
+  return cell_text(cell)
  changed=[];new_entries=[]
  for model in sheets:
-  fingerprint=hashlib.sha256(('layout-v2:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
+  fingerprint=hashlib.sha256(('template-v3:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
   existing=None
   for entry in sheet_list:
    root=ET.fromstring(parts[sheet_path(entry)])
-   if text_at(root,'B5')==model['marker']:existing=(entry,root);break
-  if existing and text_at(existing[1],'B6')==fingerprint:continue
-  if existing:entry,root=existing;target=sheet_path(entry)
+   marker_cell=next((c for c in root.findall(f'.//{{{S}}}c') if cell_text(c)==model['marker']),None)
+   if marker_cell is not None:existing=(entry,root,marker_cell.get('r'));break
+  if existing and text_at(existing[1],re.sub(r'\d+',lambda m:str(int(m.group())+1),existing[2]))==fingerprint:continue
+  if existing:entry,root,_=existing;target=sheet_path(entry)
   else:
    if any(e.get('name')==model['name'] for e in sheet_list):raise RuntimeError('Worksheet name collision; no existing sheet was overwritten.')
    number=max([int(e.get('sheetId')) for e in sheet_list]+[0])+1
@@ -109,6 +119,47 @@ def write_workbook(path,sheets,backup_dir):
   for row in range(12,12+model['gameCount']*2,2):
    for c in ['B']+[col(4+j*3) for j in range(model['playerCount'])]+[col(5+model['playerCount']*3),col(7+model['playerCount']*3)]:merge(f'{c}{row}:{c}{row+1}')
   merges.set('count',str(len(merges)))
+  if model['playerCount']==4 and model['gameCount']<=20:
+   # Use the actual Template XML, including its instruction text, cell styles,
+   # borders, merged ranges, column widths, row heights and print settings.
+   generated=root;root=copy.deepcopy(template_xml);template_data=root.find(f'{{{S}}}sheetData')
+   rowmap={int(r.get('r')):r for r in template_data}
+   template_cells={c.get('r'):c for c in root.findall(f'.//{{{S}}}c')}
+   for r in range(12,51,2):
+    for c in ['D','G','J','M','Q','S']:
+     cell=template_cells.get(f'{c}{r}')
+     if cell is not None:
+      for child in list(cell):cell.remove(child)
+      cell.attrib.pop('t',None)
+   def place_cell(cell,row):
+    ref=cell.get('r');prior=template_cells.get(ref)
+    if prior is not None:
+     # Retain the exact template cell style and other formatting attributes.
+     style=prior.get('s');index=list(rowmap[row]).index(prior);rowmap[row].remove(prior)
+     if style is not None:cell.set('s',style)
+     rowmap[row].insert(index,cell)
+    else:
+     if row not in rowmap:rowmap[row]=ET.SubElement(template_data,f'{{{S}}}row',{'r':str(row)})
+     rowmap[row].append(cell)
+   for generated_row in generated.find(f'{{{S}}}sheetData'):
+    r=int(generated_row.get('r'))
+    if r<7:continue
+    for cell in generated_row:
+     if r==7 and cell.get('r')!='M7':continue
+     place_cell(copy.deepcopy(cell),r)
+   metadata_row=max(rowmap)+2
+   for offset,value in enumerate([model['marker'],fingerprint]):
+    r=metadata_row+offset;rowxml=ET.SubElement(template_data,f'{{{S}}}row',{'r':str(r),'hidden':'1'})
+    cell=ET.SubElement(rowxml,f'{{{S}}}c',{'r':f'B{r}','t':'inlineStr'});ET.SubElement(ET.SubElement(cell,f'{{{S}}}is'),f'{{{S}}}t').text=value
+   # Sort cells added to previously empty template rows into column order.
+   def cell_order(c):
+    value=0
+    for letter in re.match(r'[A-Z]+',c.get('r')).group():value=value*26+ord(letter)-64
+    return value
+   for rowxml in template_data:rowxml[:]=sorted(rowxml,key=cell_order)
+   root.find(f'{{{S}}}dimension').set('ref',f'A1:Z{metadata_row+1}')
+   template_target=sheet_path(template);relationship_path=template_target.rsplit('/',1)[0]+'/_rels/'+template_target.rsplit('/',1)[1]+'.rels'
+   if relationship_path in parts:parts[target.rsplit('/',1)[0]+'/_rels/'+target.rsplit('/',1)[1]+'.rels']=parts[relationship_path]
   parts[target]=xml(root);changed.append(model['name'])
  if not changed:return []
  calc=wb.find(f'{{{S}}}calcPr')
