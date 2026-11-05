@@ -23,7 +23,8 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
    const cached=cache?await cache.match(key):null;
    if(cached)return new Response(cached.body,{headers:{'Content-Type':'application/json',ETag:etag,'Cache-Control':'no-cache'}});
    const [p,s,g]=await env.DB.batch([env.DB.prepare('SELECT payload FROM players ORDER BY name'),env.DB.prepare('SELECT payload FROM sessions ORDER BY json_extract(payload,\'$.created_at\') DESC'),env.DB.prepare('SELECT payload,revision FROM games ORDER BY json_extract(payload,\'$.date\') DESC, json_extract(payload,\'$.source_game_number\') DESC')]);
-   const payload={players:p.results.map(r=>JSON.parse(r.payload)),sessions:s.results.map(r=>{const v=JSON.parse(r.payload);return {...v,excel_player_ids:v.finished_at? [...new Set(g.results.map(r=>JSON.parse(r.payload)).filter(game=>game.session_id===v.id).flatMap(game=>game.results.map(r=>r.player_id)))]:undefined,source:v.source?.chippirats_session_id?{chippirats_session_id:v.source.chippirats_session_id}:undefined};}),games:g.results.filter(r=>!JSON.parse(r.payload).deleted_at).map(r=>publicGame({...JSON.parse(r.payload),revision:r.revision}))};
+   const removedSessions=new Set(s.results.map(r=>JSON.parse(r.payload)).filter(s=>s.deleted_at).map(s=>s.id));
+   const payload={players:p.results.map(r=>JSON.parse(r.payload)),sessions:s.results.filter(r=>!JSON.parse(r.payload).deleted_at).map(r=>{const v=JSON.parse(r.payload);return {...v,excel_player_ids:v.finished_at? [...new Set(g.results.map(r=>JSON.parse(r.payload)).filter(game=>game.session_id===v.id).flatMap(game=>game.results.map(r=>r.player_id)))]:undefined,source:v.source?.chippirats_session_id?{chippirats_session_id:v.source.chippirats_session_id}:undefined};}),games:g.results.filter(r=>{const game=JSON.parse(r.payload);return !game.deleted_at&&!removedSessions.has(game.session_id);}).map(r=>publicGame({...JSON.parse(r.payload),revision:r.revision}))};
    const content=JSON.stringify(payload);
    if(cache)ctx.waitUntil(cache.put(key,new Response(content,{headers:{'Content-Type':'application/json','Cache-Control':'public, max-age=86400'}})));
    return new Response(content,{headers:{'Content-Type':'application/json',ETag:etag,'Cache-Control':'no-cache','X-Content-Type-Options':'nosniff'}});
@@ -56,11 +57,22 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
     await env.DB.prepare("INSERT INTO metadata(key,value) VALUES('excel_sync_request',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify(next)).run();
     return json(next);
    }
+   const removeSession=path.match(/^\/api\/admin\/sessions\/([^/]+)$/);
+   if(removeSession&&request.method==='DELETE'){
+    requireValue(!!owner,'Only the owner can delete sessions.',403);
+    const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(removeSession[1]).first();
+    requireValue(!!row,'Session not found.',404);
+    const session=JSON.parse(row.payload);requireValue(!session.deleted_at,'Session already deleted.',409);
+    session.deleted_at=new Date().toISOString();
+    const result=await env.DB.prepare('UPDATE sessions SET payload=? WHERE id=? AND payload=?').bind(JSON.stringify(session),session.id,row.payload).run();
+    requireValue(result.meta.changes===1,'Session changed. Refresh and try again.',409);
+    return json({ok:true});
+   }
    const finish=path.match(/^\/api\/admin\/sessions\/([^/]+)\/finish$/);
    if(finish&&request.method==='POST'){
     const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(finish[1]).first();
     requireValue(!!row,'Session not found.',404);
-    const session=JSON.parse(row.payload);requireValue(!session.imported_only,'Historical sessions are already in the workbook.');
+    const session=JSON.parse(row.payload);requireValue(!session.deleted_at,'Session not found.',404);requireValue(!session.imported_only,'Historical sessions are already in the workbook.');
     if(session.finished_at)return json(session);
     const records=await env.DB.prepare('SELECT payload FROM games WHERE session_id=?').bind(session.id).all();
     const players=await env.DB.prepare('SELECT payload FROM players').all();
@@ -89,6 +101,7 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
     requireValue(Number.isInteger(body.revision)&&body.revision===row.revision,'This game changed. Reload before deleting.',409);
     const sessionRow=game.session_id?await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(game.session_id).first():null;
     const session=sessionRow?JSON.parse(sessionRow.payload):null;
+    requireValue(!session?.deleted_at,'Session not found.',404);
     requireValue(!!owner||(session&&!session.finished_at&&!session.imported_only),'Only the owner can delete games from finished or historical sessions.',403);
     game.deleted_at=new Date().toISOString();
     const statement=owner?'UPDATE games SET payload=?,revision=revision+1 WHERE id=? AND revision=?':"UPDATE games SET payload=?,revision=revision+1 WHERE id=? AND revision=? AND EXISTS (SELECT 1 FROM sessions WHERE sessions.id=games.session_id AND payload=?)";
@@ -101,7 +114,7 @@ export async function handle(request,env,ctx,authenticate=ownerIdentity){
     let previous=null,session=null;
     if(edit){const row=await env.DB.prepare('SELECT payload,revision FROM games WHERE id=?').bind(edit[1]).first();requireValue(!!row,'Game not found.',404);previous=JSON.parse(row.payload);requireValue(!previous.deleted_at,'Game not found.',404);requireValue(Number.isInteger(body.revision)&&body.revision===row.revision,'This game changed. Reload before editing.',409);}
     const sessionId=add?.[1]??previous?.session_id;
-    if(sessionId){const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(sessionId).first();requireValue(!!row,'Session not found.',404);session=JSON.parse(row.payload);}
+    if(sessionId){const row=await env.DB.prepare('SELECT payload FROM sessions WHERE id=?').bind(sessionId).first();requireValue(!!row,'Session not found.',404);session=JSON.parse(row.payload);requireValue(!session.deleted_at,'Session not found.',404);}
     if(add){requireValue(!session.imported_only,'Create a new session to record new games.');requireValue(!session.finished_at,'This session is finished. Create a new session.');}
     const players=await env.DB.prepare('SELECT id FROM players').all();
     const game=makeGame(body,session,new Set(players.results.map(p=>p.id)),previous);
