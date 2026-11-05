@@ -1,5 +1,5 @@
 """Append/update only 1riichi-owned worksheet XML; preserve all other ZIP parts."""
-import ast,copy,hashlib,json,os,re,shutil,sys,tempfile,zipfile
+import ast,copy,hashlib,json,os,re,shutil,sys,tempfile,zipfile,uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from datetime import datetime,timezone
@@ -28,6 +28,8 @@ def write_workbook(path,sheets,backup_dir):
  template=next((e for e in sheet_list if e.get('name')=='Template'),None)
  if template is None:raise RuntimeError('Workbook Template sheet is missing.')
  template_xml=ET.fromstring(parts[sheet_path(template)])
+ template_namespaces=dict(value for _,value in ET.iterparse(io.BytesIO(parts[sheet_path(template)]),events=['start-ns']))
+ for prefix,uri in template_namespaces.items():ET.register_namespace(prefix,uri)
  styles={c.get('r'):c.get('s') for c in template_xml.findall(f'.//{{{S}}}c')}
  shared_strings=[]
  if 'xl/sharedStrings.xml' in parts:
@@ -43,7 +45,7 @@ def write_workbook(path,sheets,backup_dir):
   return cell_text(cell)
  changed=[];new_entries=[]
  for model in sheets:
-  fingerprint=hashlib.sha256(('template-v3:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
+  fingerprint=hashlib.sha256(('template-v5:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
   existing=None
   for entry in sheet_list:
    root=ET.fromstring(parts[sheet_path(entry)])
@@ -160,7 +162,17 @@ def write_workbook(path,sheets,backup_dir):
    root.find(f'{{{S}}}dimension').set('ref',f'A1:Z{metadata_row+1}')
    template_target=sheet_path(template);relationship_path=template_target.rsplit('/',1)[0]+'/_rels/'+template_target.rsplit('/',1)[1]+'.rels'
    if relationship_path in parts:parts[target.rsplit('/',1)[0]+'/_rels/'+target.rsplit('/',1)[1]+'.rels']=parts[relationship_path]
-  parts[target]=xml(root);changed.append(model['name'])
+  revision_uid='{http://schemas.microsoft.com/office/spreadsheetml/2014/revision}uid'
+  if revision_uid in root.attrib:root.set(revision_uid,'{'+str(uuid.uuid5(uuid.NAMESPACE_URL,model['marker'])).upper()+'}')
+  serialized=xml(root)
+  # ElementTree omits unused namespace declarations, but Excel's mc:Ignorable
+  # attribute refers to their prefixes by name. Keep those declarations valid.
+  from xml.sax.saxutils import quoteattr
+  for prefix,uri in template_namespaces.items():
+   declaration='xmlns'+(':'+prefix if prefix else '')
+   if (declaration+'=').encode() not in serialized:
+    serialized=serialized.replace(b'<worksheet ',('<worksheet '+declaration+'='+quoteattr(uri)+' ').encode(),1)
+  parts[target]=serialized;changed.append(model['name'])
  if not changed:return []
  calc=wb.find(f'{{{S}}}calcPr')
  if calc is None:calc=ET.SubElement(wb,f'{{{S}}}calcPr')
