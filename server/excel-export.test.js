@@ -20,3 +20,9 @@ test('empty sessions and unresolved top ties cannot export',()=>{
  assert.throws(()=>sessionWorksheet(session,[],players),/at least one game/);
  assert.throws(()=>sessionWorksheet(session,[{...game,results:game.results.map((r,i)=>({...r,place:i<2?1.5:i+1}))}],players),/tie-break/);
 });
+
+test('the host total credits the recorded host when Eric is not hosting',()=>{
+ const sheet=sessionWorksheet(session,[{...game,host_player_id:'1'}],players);
+ assert.equal(sheet.formulas[8][19],'=G9+Q9');
+ assert.equal(sheet.values[7][12],'Eric C');
+});

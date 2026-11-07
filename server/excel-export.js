@@ -31,8 +31,10 @@ export function sessionWorksheet(session,games,players){
  }
  formula(9,feeColumn,`SUM(${fee}12:${fee}${endRow})`);formula(10,feeColumn,`${fee}9*${session.rate??0.5}`);
  formula(9,checkColumn,`${scoreColumns.map(c=>c+'9').join('+')}+${fee}9`);formula(10,checkColumn,`${check}9*${session.rate??0.5}`);
- const eric=ids.findIndex(id=>names.get(id)==='Eric C');
- if(eric>=0){formula(9,hostColumn,`${scoreColumns[eric]}9+${fee}9`);formula(10,hostColumn,`${host}9*${session.rate??0.5}`);}
+ const recordedHosts=[...new Set(ordered.map(g=>g.host_player_id??g.host_fee?.host_player_id).filter(Boolean))];
+ const hostId=session.host_player_id??(recordedHosts.length===1?recordedHosts[0]:null);
+ const hostIndex=hostId?ids.indexOf(hostId):ids.findIndex(id=>names.get(id)==='Eric C');
+ if(hostIndex>=0){formula(9,hostColumn,`${scoreColumns[hostIndex]}9+${fee}9`);formula(10,hostColumn,`${host}9*${session.rate??0.5}`);}
  for(const [i,game] of ordered.entries()){
   if(game.results.length!==4||game.results.some(r=>!Number.isFinite(r.final_points)))throw Error('A game has invalid final points.');
   if(Math.abs(game.results.reduce((n,r)=>n+r.final_points,0))>0.11)throw Error('Game points do not balance.');
