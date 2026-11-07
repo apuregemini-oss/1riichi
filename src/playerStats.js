@@ -1,4 +1,4 @@
-export const signedPoints = value => `${value > 0 ? '+' : ''}${Number(value.toFixed(1))}`;
+export const signedPoints = value => `${value > 0 ? '+' : ''}${value.toFixed(1)}`;
 export function gameTime(date) {
   // Date-only records are local calendar dates, not midnight UTC.
   const value = /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T12:00:00` : date;
