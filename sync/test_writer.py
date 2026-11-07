@@ -23,6 +23,7 @@ class WriterTests(unittest.TestCase):
     for ref in ['D12','D9','F13','T9']:
      cell=root.find(f'.//{{{S}}}c[@r="{ref}"]')
      self.assertEqual(formats[xfs[int(cell.get('s'))].get('numFmtId')],'+0.0;[Red]-0.0;0.0')
+     self.assertEqual(xfs[int(cell.get('s'))].find(f'{{{S}}}alignment').get('shrinkToFit'),'1')
     namespaces=dict(value for _,value in ET.iterparse(io.BytesIO(sheet_bytes),events=['start-ns']))
     for prefix in root.get('{http://schemas.openxmlformats.org/markup-compatibility/2006}Ignorable','').split():self.assertIn(prefix,namespaces)
     workbook=ET.fromstring(before['xl/workbook.xml'])

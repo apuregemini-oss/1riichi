@@ -41,6 +41,9 @@ def write_workbook(path,sheets,backup_dir):
  def decimal_style(style):
   if style not in decimal_styles:
    clone=copy.deepcopy(xfs[int(style)]);clone.set('numFmtId',decimal_id);clone.set('applyNumberFormat','1')
+   alignment=clone.find(f'{{{S}}}alignment')
+   if alignment is None:alignment=ET.SubElement(clone,f'{{{S}}}alignment')
+   alignment.set('shrinkToFit','1');alignment.set('wrapText','0');clone.set('applyAlignment','1')
    matching=next((str(i) for i,e in enumerate(xfs) if ET.tostring(e)==ET.tostring(clone)),None)
    if matching is None:matching=str(len(xfs));xfs.append(clone);added_styles.append(clone)
    decimal_styles[style]=matching
@@ -59,7 +62,7 @@ def write_workbook(path,sheets,backup_dir):
   return cell_text(cell)
  changed=[];new_entries=[]
  for model in sheets:
-  fingerprint=hashlib.sha256(('template-v6-decimals:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
+  fingerprint=hashlib.sha256(('template-v7-decimals-fit:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
   existing=None
   for entry in sheet_list:
    root=ET.fromstring(parts[sheet_path(entry)])
