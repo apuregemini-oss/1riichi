@@ -31,6 +31,20 @@ def write_workbook(path,sheets,backup_dir):
  template_namespaces=dict(value for _,value in ET.iterparse(io.BytesIO(parts[sheet_path(template)]),events=['start-ns']))
  for prefix,uri in template_namespaces.items():ET.register_namespace(prefix,uri)
  styles={c.get('r'):c.get('s') for c in template_xml.findall(f'.//{{{S}}}c')}
+ style_root=ET.fromstring(parts['xl/styles.xml'])
+ formats=style_root.find(f'{{{S}}}numFmts');xfs=style_root.find(f'{{{S}}}cellXfs')
+ decimal_code='+0.0;[Red]-0.0;0.0'
+ decimal_id=next((e.get('numFmtId') for e in formats if e.get('formatCode')==decimal_code),None) if formats is not None else None
+ new_format=decimal_id is None
+ if new_format:decimal_id=str(max([163]+[int(e.get('numFmtId')) for e in formats] if formats is not None else [163])+1)
+ added_styles=[];decimal_styles={}
+ def decimal_style(style):
+  if style not in decimal_styles:
+   clone=copy.deepcopy(xfs[int(style)]);clone.set('numFmtId',decimal_id);clone.set('applyNumberFormat','1')
+   matching=next((str(i) for i,e in enumerate(xfs) if ET.tostring(e)==ET.tostring(clone)),None)
+   if matching is None:matching=str(len(xfs));xfs.append(clone);added_styles.append(clone)
+   decimal_styles[style]=matching
+  return decimal_styles[style]
  shared_strings=[]
  if 'xl/sharedStrings.xml' in parts:
   shared_strings=[''.join(t.text or '' for t in item.iter(f'{{{S}}}t')) for item in ET.fromstring(parts['xl/sharedStrings.xml'])]
@@ -45,7 +59,7 @@ def write_workbook(path,sheets,backup_dir):
   return cell_text(cell)
  changed=[];new_entries=[]
  for model in sheets:
-  fingerprint=hashlib.sha256(('template-v5:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
+  fingerprint=hashlib.sha256(('template-v6-decimals:'+json.dumps(model,sort_keys=True,ensure_ascii=False)).encode()).hexdigest()
   existing=None
   for entry in sheet_list:
    root=ET.fromstring(parts[sheet_path(entry)])
@@ -162,6 +176,13 @@ def write_workbook(path,sheets,backup_dir):
    root.find(f'{{{S}}}dimension').set('ref',f'A1:Z{metadata_row+1}')
    template_target=sheet_path(template);relationship_path=template_target.rsplit('/',1)[0]+'/_rels/'+template_target.rsplit('/',1)[1]+'.rels'
    if relationship_path in parts:parts[target.rsplit('/',1)[0]+'/_rels/'+target.rsplit('/',1)[1]+'.rels']=parts[relationship_path]
+  score_cols={col(4+j*3) for j in range(model['playerCount'])}
+  running_cols={col(6+j*3) for j in range(model['playerCount'])}
+  total_cols=score_cols|{col(5+model['playerCount']*3),col(7+model['playerCount']*3),col(8+model['playerCount']*3)}
+  for cell in root.findall(f'.//{{{S}}}c'):
+   c,r=re.fullmatch(r'([A-Z]+)(\d+)',cell.get('r')).groups();r=int(r)
+   if (r==9 and c in total_cols) or (12<=r<=max(50,11+model['gameCount']*2) and (c in score_cols or c in running_cols)):
+    cell.set('s',decimal_style(cell.get('s','0')))
   revision_uid='{http://schemas.microsoft.com/office/spreadsheetml/2014/revision}uid'
   if revision_uid in root.attrib:root.set(revision_uid,'{'+str(uuid.uuid5(uuid.NAMESPACE_URL,model['marker'])).upper()+'}')
   serialized=xml(root)
@@ -174,6 +195,19 @@ def write_workbook(path,sheets,backup_dir):
     serialized=serialized.replace(b'<worksheet ',('<worksheet '+declaration+'='+quoteattr(uri)+' ').encode(),1)
   parts[target]=serialized;changed.append(model['name'])
  if not changed:return []
+ # Append styles while retaining original definitions and namespace declarations.
+ if added_styles:
+  style_text=parts['xl/styles.xml'].decode('utf-8')
+  style_text=re.sub(r'(<cellXfs\b[^>]*count=")[^"]*',lambda m:m.group(1)+str(len(xfs)),style_text,count=1)
+  style_text=style_text.replace('</cellXfs>',''.join(ET.tostring(e,encoding='unicode') for e in added_styles)+'</cellXfs>')
+  if new_format:
+   fmt=ET.Element(f'{{{S}}}numFmt',{'numFmtId':decimal_id,'formatCode':decimal_code})
+   item=ET.tostring(fmt,encoding='unicode')
+   if formats is None:style_text=re.sub(r'(<styleSheet\b[^>]*>)',lambda m:m.group(1)+'<numFmts count="1">'+item+'</numFmts>',style_text,count=1)
+   else:
+    style_text=re.sub(r'(<numFmts\b[^>]*count=")[^"]*',lambda m:m.group(1)+str(len(formats)+1),style_text,count=1)
+    style_text=style_text.replace('</numFmts>',item+'</numFmts>')
+  parts['xl/styles.xml']=style_text.encode('utf-8')
  calc=wb.find(f'{{{S}}}calcPr')
  if calc is None:calc=ET.SubElement(wb,f'{{{S}}}calcPr')
  calc.set('fullCalcOnLoad','1')

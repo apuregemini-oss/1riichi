@@ -13,9 +13,16 @@ class WriterTests(unittest.TestCase):
    first=path.read_bytes();self.assertEqual(write_workbook(path,[model],Path(folder)/'backups'),[]);self.assertEqual(first,path.read_bytes())
    with zipfile.ZipFile(path) as z:
     for name,content in before.items():
-     if name not in ['xl/workbook.xml','xl/_rels/workbook.xml.rels','[Content_Types].xml']:self.assertEqual(z.read(name),content,name)
+     if name not in ['xl/styles.xml','xl/workbook.xml','xl/_rels/workbook.xml.rels','[Content_Types].xml']:self.assertEqual(z.read(name),content,name)
     added=set(z.namelist())-set(before);self.assertEqual(len(added),1)
     sheet_bytes=z.read(added.pop());root=ET.fromstring(sheet_bytes)
+    styles=ET.fromstring(z.read('xl/styles.xml'));old_styles=ET.fromstring(before['xl/styles.xml'])
+    xfs=styles.find(f'{{{S}}}cellXfs');old_xfs=old_styles.find(f'{{{S}}}cellXfs')
+    self.assertEqual([ET.tostring(e) for e in xfs[:len(old_xfs)]],[ET.tostring(e) for e in old_xfs])
+    formats={e.get('numFmtId'):e.get('formatCode') for e in styles.find(f'{{{S}}}numFmts')}
+    for ref in ['D12','D9','F13','T9']:
+     cell=root.find(f'.//{{{S}}}c[@r="{ref}"]')
+     self.assertEqual(formats[xfs[int(cell.get('s'))].get('numFmtId')],'+0.0;[Red]-0.0;0.0')
     namespaces=dict(value for _,value in ET.iterparse(io.BytesIO(sheet_bytes),events=['start-ns']))
     for prefix in root.get('{http://schemas.openxmlformats.org/markup-compatibility/2006}Ignorable','').split():self.assertIn(prefix,namespaces)
     workbook=ET.fromstring(before['xl/workbook.xml'])
