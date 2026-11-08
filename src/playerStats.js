@@ -1,4 +1,8 @@
 export const signedPoints = value => `${value > 0 ? '+' : ''}${value.toFixed(1)}`;
+export function gameTimestamp(date) {
+ if(/^\d{4}-\d{2}-\d{2}$/.test(date))return `${new Date(gameTime(date)).toLocaleDateString()} · Time not recorded`;
+ return new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',timeZoneName:'short'}).format(new Date(date));
+}
 export function gameTime(date) {
   // Date-only records are local calendar dates, not midnight UTC.
   const value = /^\d{4}-\d{2}-\d{2}$/.test(date) ? `${date}T12:00:00` : date;

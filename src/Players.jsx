@@ -1,5 +1,5 @@
 import { useState, useId } from 'react';
-import { gameTime, signedPoints, groupPlayerSessions } from './playerStats';
+import { gameTime, signedPoints, groupPlayerSessions, gameTimestamp } from './playerStats';
 const dateLabel = date => new Date(gameTime(date)).toLocaleDateString();
 export function SessionOverview({players}) {
   const headingId = useId();
@@ -35,7 +35,7 @@ function RecentTrend({records}) {
       <line x1="45" x2={width-20} y1={y(2.5)} y2={y(2.5)} className="chart-zero"/>
       <polyline points={recent.map(({result},i)=>`${x(i)},${y(result.place)}`).join(' ')} className="placement-line"/>
       {recent.map(({game,result},i)=><g key={game.id}>
-        <circle cx={x(i)} cy={y(result.place)} r="5" className={result.place<2.5?'chart-positive':'chart-negative'}><title>{dateLabel(game.date)}{game.source_game_number ? ` · Game ${game.source_game_number}` : ''}: {result.place_label} place, {signedPoints(result.final_points)} points</title></circle>
+        <circle cx={x(i)} cy={y(result.place)} r="5" className={result.place<2.5?'chart-positive':'chart-negative'}><title>{gameTimestamp(game.date)}{game.source_game_number ? ` · Game ${game.source_game_number}` : ''}: {result.place_label} place, {signedPoints(result.final_points)} points</title></circle>
         <text x={x(i)} y={y(result.place)+(result.place<2.5?-12:21)} textAnchor="middle" className="placement-point-label">{signedPoints(result.final_points)}</text>
       </g>)}
       <text x="55" y="220">{dateLabel(recent[0].game.date)}</text><text x={width-20} y="220" textAnchor="end">{dateLabel(recent[recent.length-1].game.date)}</text>
@@ -54,7 +54,7 @@ export function PlayerProfile({player, data}) {
       <div className="record-body">
         {session.sessionId && <a href={`#session/${session.sessionId}`}>Open full session →</a>}
         {session.records.map(({game,result},index)=><section className="session-history-game" key={game.id}>
-          <div className="row"><h3>Game {game.source_game_number ?? index+1}</h3><strong className={result.final_points>=0?'positive':'negative'}>{result.place_label} · {signedPoints(result.final_points)} pts</strong></div>
+          <div className="row"><div><h3>Game {game.source_game_number ?? index+1}</h3><time className="muted" dateTime={game.date}>{gameTimestamp(game.date)}</time></div><strong className={result.final_points>=0?'positive':'negative'}>{result.place_label} · {signedPoints(result.final_points)} pts</strong></div>
           <div className="table-wrap"><table><thead><tr><th>Player</th><th>Score</th><th>Place</th><th>Points</th></tr></thead><tbody>{game.results.map(r=><tr key={r.player_id} className={r.player_id===player.id?'own-result':''}><td>{playerName(r.player_id)}</td><td>{r.score?.toLocaleString() ?? 'Not recorded'}</td><td>{r.place_label}</td><td>{signedPoints(r.final_points)}</td></tr>)}</tbody></table></div>
           {game.host_fee && <p className="footnote">Host fee: {game.host_fee.chips ? `${playerName(game.host_fee.winner_player_id)} → ${playerName(game.host_fee.host_player_id)}: ${game.host_fee.chips} chips` : 'Host won; no transfer.'}</p>}
           {game.notes && <p className="muted">{game.notes}</p>}
