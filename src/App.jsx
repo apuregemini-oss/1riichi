@@ -20,7 +20,7 @@ function SessionCard({session, data, onOpen, onDelete, busy}) {
   return <details className="session-expand" onToggle={e=>setExpanded(e.currentTarget.open)}>
     <summary className="session-card"><span><strong>{session.name}</strong><small>{new Date(gameTime(session.created_at)).toLocaleDateString()} · {games.length} games</small></span>{onDelete&&<DeleteAction label={`Delete session ${session.name}`} description={`Remove session and ${games.length} games? Excel stays unchanged.`} busy={busy} onConfirm={()=>onDelete(session)}/>}<span className="session-chevron" aria-hidden="true">▸</span></summary>
     {expanded && <div className="session-card-body">
-      {session.finished_at&&<SessionSettlement players={buildPlayerStats({...data,games}).filter(p=>p.games>0)} session={session}/>}<SessionOverview players={buildPlayerStats({...data,games}).filter(p=>p.games>0)}/>
+      <SessionOverview players={buildPlayerStats({...data,games}).filter(p=>p.games>0)} settlementSession={session}/>
       <button className="primary" onClick={onOpen}>View all games →</button>
     </div>}
   </details>;

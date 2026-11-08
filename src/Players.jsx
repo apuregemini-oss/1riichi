@@ -1,17 +1,20 @@
 import { useState, useId } from 'react';
+import {sessionSettlement,signedDollars} from './settlement';
 import { gameTime, signedPoints, groupPlayerSessions, gameTimestamp } from './playerStats';
 const dateLabel = date => new Date(gameTime(date)).toLocaleDateString();
-export function SessionOverview({players}) {
+export function SessionOverview({players,settlementSession}) {
   const headingId = useId();
+  const dollars=new Map(settlementSession?sessionSettlement(players,settlementSession).map(p=>[p.id,p.totalCents]):[]);
   return <section className="session-overview" aria-labelledby={headingId}>
     <h2 id={headingId}>Session overview</h2>
-    <p className="muted">Placement counts are 1st–2nd–3rd–4th. Total points include uma and oka; host fees are separate.</p>
-    {players.length ? <div className="table-wrap"><table><thead><tr><th>Player</th><th>Games</th><th>1st–2nd–3rd–4th</th><th>Avg. place</th><th>Total points</th></tr></thead>
+    <p className="muted">Placement counts are 1st–2nd–3rd–4th. Total points include uma and oka; host fees are separate.{settlementSession&&' Net dollars include host-fee credits and deductions.'}</p>
+    {players.length ? <div className="table-wrap"><table><thead><tr><th>Player</th><th>Games</th><th>1st–2nd–3rd–4th</th><th>Avg. place</th><th>Total points</th>{settlementSession&&<th>Net dollars</th>}</tr></thead>
       <tbody>{players.map(p=><tr key={p.id}>
         <td><a href={`#player/${p.id}`}>{p.name}</a></td><td>{p.games}</td>
         <td className="placement-counts">{p.placementCounts.join('-')}{p.tiedGames>0 && <small>+ {p.tiedGames} tied</small>}</td>
         <td>{p.averagePlacement.toFixed(2)}</td>
         <td className={p.points>0?'positive':p.points<0?'negative':''}><strong>{signedPoints(p.points)}</strong></td>
+        {settlementSession&&<td className={dollars.get(p.id)>0?'positive':dollars.get(p.id)<0?'negative':''}><strong>{signedDollars(dollars.get(p.id))}</strong></td>}
       </tr>)}</tbody></table></div> : <p className="empty">Record a game to see this session’s overview.</p>}
   </section>;
 }
